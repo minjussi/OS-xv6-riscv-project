@@ -2,10 +2,10 @@
 
 2025 Fall SKKU - Operating System class
 
-- PA1: 
+- PA1: System call (getnice, setnice, ps, meminfo, waitpid)
 
-- PA2:
+- PA2: CPU scheduling (Linux EEVDF scheduler)
 
-- PA3:
+- PA3: Virtual memory (mmap, munmap, freemem, page fault handler)
 
-- PA4:
+- PA4: Page replacement (page swapping & LRU)

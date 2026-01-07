@@ -22,5 +22,5 @@
 ### Future Tasks (To-Do)
 
 - [ ] **Bug Fixes:** Debugging stability issues in the current scheduler and memory management.
-- [ ] **File I/O Implementation:** Implementing robust file input/output operations.
+- [ ] **File I/O Implementation:** Implementing file input/output operations.
 - [ ] **Code Refactoring:** Improving code readability and structure.

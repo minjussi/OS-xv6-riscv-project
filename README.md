@@ -21,6 +21,8 @@
 
 ### Future Tasks (To-Do)
 
+> Reference: https://pdos.csail.mit.edu/6.1810/2025/xv6/book-riscv-rev5.pdf
+
 - [ ] **Bug Fixes:** Debugging stability issues in the current scheduler and memory management.
 - [ ] **File I/O Implementation:** Implementing file input/output operations.
 - [ ] **Code Refactoring:** Improving code readability and structure.

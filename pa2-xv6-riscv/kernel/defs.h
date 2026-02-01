@@ -60,7 +60,7 @@ void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
 // kalloc.c에 정의된 함수
-uint64          freememinfo(void);
+int             freememinfo(void);
 
 // log.c
 void            initlog(int, struct superblock*);

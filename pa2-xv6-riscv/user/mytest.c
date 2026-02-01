@@ -24,12 +24,10 @@ int main()
 		{
 			setnice(getpid(), i*10);
 			ps(0);
-			printf("\n");
+			printf("The process successfully determinated.\n");
 			exit(0); // 종료 status가 0 == 정상 종료
 
 		} 
-
-	
 	}
 
 	ps(0);

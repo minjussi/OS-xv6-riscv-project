@@ -72,10 +72,7 @@ usertrap(void)
     // ok
   } else if((r_scause() == 15 || r_scause() == 13) &&
             vmfault(p->pagetable, r_stval(), (r_scause() == 13)? 1 : 0) != 0) {
-    // page fault on lazily-allocated page (page fault가 발생함)
-    // 디버깅용 프린트
-    printf("page fault: scause=0x%lx, stval=0x%lx\n", r_scause(), r_stval());
-    if ()
+    // page fault on lazily-allocated page
   } else {
     printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
     printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());

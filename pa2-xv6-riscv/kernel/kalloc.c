@@ -89,10 +89,9 @@ kalloc(void)
   r = kmem.freelist;
   if(r)
     kmem.freelist = r->next;
-    kmem.page_count--; // allocate 되면 count 감소
   release(&kmem.lock);
 
   if(r)
-    memset((char*)r, 5, PGSIZE);
+    memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }

@@ -3,24 +3,18 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
-#include "proc.h" // 프로세스가 가지는 자료구조
+#include "proc.h"
 #include "defs.h"
 
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
-// mmap_area는 최대 64(param.h에 정의)
-struct mmap_area mmap_areas[NAREA];
-
-// 동기화를 위한 새로운 락 정의
-struct spinlock map_lock; 
-
 // 프로세스 테이블 전체에 lock 걸기
 // 새로운 프로세스들어오는 것 막아서 정확히 계산
 struct spinlock proct_lock;
 
-struct proc *initproc;
+struct proc *initproc; // 이걸 정의한 이유가 뭐지요?????
 
 int nextpid = 1;
 // 프로세스 생성할 때 다른 프로세스와 아이디 겹치는 거 방지
@@ -32,18 +26,19 @@ static void freeproc(struct proc *p);
 extern char trampoline[]; // trampoline.S
 
 // wait로 영원히 잠드는 것 방지 
+// prevent to sleep permenantly by using "wait"
 struct spinlock wait_lock;
 
 // eevdf scheduler
-// 가중치 미리 계산해서 배열로 넣어두기
-int weight[] = {88761, 71755, 56483, 46273, 36291,
-		29154, 23254, 18705, 14949, 11916,
-		 9548,  7620,  6100,  4904,  3906,
-		 3121,  2501,  1991,  1586,  1277,
-		 1024,   820,   655,   526,   423,
-		  335,   272,   215,   172,   137,
-		  110,    87,    70,    56,    45,
-		   36,    29,    23,    18,    15};
+// calculate weights in advance
+int weight[] = {88761, 71755, 56483, 46273, 36291, /*0*/
+		29154, 23254, 18705, 14949, 11916, /*5*/
+		 9548,  7620,  6100,  4904,  3906, /*10*/
+		 3121,  2501,  1991,  1586,  1277, /*15*/
+		 1024,   820,   655,   526,   423, /*20*/
+		  335,   272,   215,   172,   137, /*25*/
+		  110,    87,    70,    56,    45, /*30*/
+		   36,    29,    23,    18,    15}; /*35*/
 
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
@@ -63,6 +58,7 @@ proc_mapstacks(pagetable_t kpgtbl)
 }
 
 // initialize the proc table.
+// 페이지 테이블 초기화 
 void
 procinit(void)
 {
@@ -143,11 +139,11 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-  p->priority = 20; 		// 우선순위 값 초기화
-  p->weight = weight[20];	// 가중치 초기화
+  p->priority = 20; 		// initialize the priority value as 20 (우선순위 값 초기화)
+  p->weight = weight[20];	// initialize the weight as 1024 (가중치 초기화)
   p->runtime = 0;		// 일단 실제 실행 시간은 0
   p->vruntime = 0;		// 초기화는 0
-  p->vdeadline = 5000;		// 초기화는 5000
+  p->vdeadline = 5000;	// 초기화는 5000
   p->is_eligible = 1;		// 초기화는 true
   p->remain_time = 5;		// remain_time은 5로 초기화
 
@@ -245,187 +241,12 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmfree(pagetable, sz);
 }
 
-// mmap 시스템콜 정의
-// map_lock을 정의-> mmap_area에 적는 거 보호
-// mmap을 프로세스가 호출하면 mmap_area에 정보를 저장하게 됨
-#define MASK ~(1UL << 0) // 0번째만 0이고 나머지는 1
-uint64
-mmap(uint64 addr, int length, int prot, int flags, int fd, int offset)
-{
-	uint64 va; // 가상 페이지 주소
-	uint64 top = MMAPBASE; // mmap 공간에서 어디까지 채워졌는지를 나타내는 변수
-	struct proc *p = myproc();
-	int idx = -1;
-	int page_num = 0;
-	// 유효성 검사하기 
-	if (length <= 0) return 0;
-	if (offset < 0) return 0;
-	if (length % PGSIZE != 0) return 0;
-	page_num = length / PGSIZE;
-	// lock 잡고 시작
-	acquire(&map_lock);
-	// mmap_areas를 순회해서 빈 슬롯 찾기
-	for (int i = 0; i < NAREA; i++){
-		if (mmap_areas[i].p == p){
-			uint64 end_addr = MMAPBASE +  mmap_areas[i].addr + mmap_areas[i].length;
-			if (end_addr > top){
-				top = end_addr;
-			}
-		}
-		else if (mmap_areas[i].p == 0){
-			if (idx = -1) idx = i;
-		}
-	}
-
-	va = top + addr; // 가샹 주소 결정
-
-	// MAP_ANONYMOUS가 주어짐
-	if (flags & MAP_ANONYMOUS){
-		// 유효성 검사
-		if (fd != -1) return 0;
-		if (offset != 0) return 0;
-		if (flags & MAP_POPULATE) { // anonymous 이면서 populate
-			// 물리 페이지랑 연결 & 0으로 채우기 
-			// 페이지 개수에 따라 반복
-			for (int i = 0; i < page_num; i++){
-				uint64 pa = kalloc();
-				memset(pa, 0, PGSIZE);
-				mappages(p->pagetable, va + i*PGSIZE, PGSIZE, pa, prot) // 여기 함수 안에 보면 pte도 같이 함
-			}
-			mmap_areas[idx].f = NULL;
-			mmap_areas[idx].addr = addr;
-			mmap_areas[idx].length = length;
-			mmap_areas[idx].offset = offset;
-			mmap_areas[idx].prot = prot;
-			mmap_areas[idx].flags = flags;
-			mmap_areas[idx].p = p;
-		}
-		else{ // anonymous인데 populate 없음(지연 할당)
-			if (pte && (*pte & PTE_U)){ // entry가 존재하고 접근 권한 있음 -> 정상 동작
-				for (int i = 0; i < page_num; i++){
-					pte_t *pte = walk(p->pagetable, va + i*PGSIZE, 1);
-					*pte = *pte & MASK; // valid bit을 0으로 설정
-				}
-				mmap_areas[idx].f = NULL;
-				mmap_areas[idx].addr = addr;
-				mmap_areas[idx].legnth = length;
-				mmap_areas[idx].offset = offset;
-				mmap_areas[idx].prot = prot;
-				mmap_areas[idx].flags = flags;
-				mmap_areas[idx].p = p;
-			}
-			else {
-				// page fault
-			}
-		}
-	}
-	
-	// file mapping일 때
-	else{
-		if (fd == -1) return 0;
-		struct file *fp = p->ofile[fd];
-		fp->off = offset;
-		// 해당 file의 권한과 prot가 일치하는가
-		if ((prot & PROT_READ) && !fp->readable) return 0;
-		if ((port & PROT_WRITE) && !fp->writable) return 0;
-		if (flags & MAP_POPULATE){ // file mapping 이면서 populate
-			for (int i = 0; i < page_num; i++){
-				uint64 pa = kalloc();
-				mappages(p->pagetable, va + i * PGSIZE, PGSIZE, pa, prot); // 물리 페이지 할당
-				
-				release(&map->lock); // 파일 읽어오기 전에 lock 해제
-				release(&p_lock);
-				
-				fileread(fp, va + i * PGSIZE, PGSIZE); // 파일 크기만큼 데이터를 읽어오기
-				
-				acquire(&p->lock); // 처리 후 다시 lock 잡기
-				acquire(&map->lock);
-			}
-			mmap_areas[idx].f = p->ofile[fd];
-			mmap_areas[idx].addr = addr;
-			mmap_areas[idx].length = length;
-			mmap_areas[idx].offset = offset;
-			mmap_areas[idx].prot = prot;
-			mmap_areas[idx].flags = flags;
-			mmap_areas[idx].p = p;
-		}
-		else{ // file mapping인데 populate 없음
-			if (pte && (*pte & PTE_U)) {
-				for (int i = 0; i < page_num; i++){
-					pte_t *pte = walk(p->pagetable, va + i*PGSIZE, 1);
-					*pte = *pte & MASK;
-				}
-				mmap_areas[idx].f = p->ofile[fd];
-				mmap_areas[idx].addr = addr;
-				mmap_areas[idx].legnth = length;
-				mmap_areas[idx].offset = offset;
-				mmap_areas[idx].prot = prot;
-				mmap_areas[idx].flags = flags;
-				mmap_areas[idx].p = p;
-			}
-			else {
-				// page fault
-			}
-		}
-	}
-	// lock 풀기
-	release(&map_lock);
-	return va; 
-}
-
-// page fault handler 함수를 두어서 trap을 보조
-int
-pgfault_handler()
-{
-	uint64 fa = r_stval(); // fault address 파악
-}
-
-//munmap 시스템콜 정의
-int
-munmap(uint64 addr)
-{
-	// 현재 프로세스
-	struct proc *p = myporc();
-	struct mmap_area *area = 0;
-	int idx = 0;
-	// mmap_area 찾기 -> 일치하는 거 찾으면 시작 주소, 길이 알 수 있음
-	for (int i = 0; i < NAREA; i++){
-		if (mmap_areas[i].p && mmap_areas[i].p == p && mmap_area[i].addr == addr){
-			area = &mmap_areas[i];
-			idx = i;
-			break;
-		}
-	}
-	// area 찾기 실패
-	if (area == 0) return -1;
-	uint64 end_addr = area->addr + area->length;
-	
-	// 알게 된 가상 주소랑 길이 가지고
-	// PTE 존재하면 kfree 하고 PTE 삭제  아니면 그대로 두기
-	acquire(&map_lock);
-	for (uint64 a = area->addr; a < end_addr; a += PGSIZE){
-		pte_t *pte = walk(p->pagetable, a, 0);
-		// 없으면 계속 찾기
-		if (pte == 0) continue;
-		// 물리 페이지가 할당된 경우
-		if (*pte & PTE_V){ // 물리 페이지 free하고 PTE 삭제
-			uint64 pa = PTE2PA(*pte);
-			memset((void*)pa, 1, PGSIZE);
-			kfree((void*)pa);
-		}
-	}
-	*pte = 0;
-	mmap_areas[idx].p = 0;
-	release(&map_lock);
-	return 1;
-}
-
 // freemem 시스템콜
 // 비어 있는 page 개수 반환
 int
 freemem()
 {
-	return freememinfo()
+	return freememinfo();
 }
 
 // Set up first user process.
@@ -502,10 +323,12 @@ kfork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   // 부모의 값 상속
+  // inherent parent's value
   np->priority = p->priority;
   np->weight = p->weight;
   np->vruntime = p->vruntime;
   // 값 초기 상태로 할당
+  // allocate initial value 
   np->runtime = 0;
   np->remain_time = 5; 
   // vdeadline은 다시 계산
@@ -583,7 +406,7 @@ kexit(int status)
   release(&wait_lock);
 
   // Jump into the scheduler, never to return.
-  // 여기도 sched() 존재
+  // 여기도 sched() 존재 -> sched 사용 x
   sched();
   panic("zombie exit");
 }
@@ -605,7 +428,7 @@ kwait(uint64 addr)
     for(pp = proc; pp < &proc[NPROC]; pp++){
       if(pp->parent == p){
         // make sure the child isn't still in exit() or swtch().
-	// 자식 프로세스 lock
+        // 자식 프로세스 lock
         acquire(&pp->lock);
 
         havekids = 1;
@@ -649,7 +472,7 @@ kwait(uint64 addr)
 //  - choose a process to run.
 //  - swtch to start running that process.
 //  - eventually that process transfers control via swtch back to the scheduler.
-// 현재 존재하는 scheduler에서 안에 구조를 바꾸기(eevdf로)
+// 현재 존재하는 scheduler에서 안에 구조를 바꾸기(eevdf로) : creating eevdf scheduler
 void
 scheduler(void)
 {
@@ -668,7 +491,7 @@ scheduler(void)
     // 프로세스 테이블 전체 lock
     acquire(&proct_lock);
     // 전체 프로세스 순회하면서 runnable 상태의 프로세스들의 min_vruntime 구하기
-    struct proc *firstp = 0;
+    struct proc *firstp = 0; // 그 다음 실행 순서 (첫 번째 실행 순서)
     uint64 min_vruntime = 0;
     uint64 total_weight = 0;
     uint64 calculated = 0;
@@ -681,60 +504,57 @@ scheduler(void)
 		    break;
 	    }
     }
+
     // first process가 존재하면 실행 (포인터 변수)
-    if (firstp)
-    {
-	// min_vruntime 찾기
-	for (p=proc; p<&proc[NPROC]; p++){
-		if (p->state == RUNNABLE && p->vruntime < min_vruntime){
-			min_vruntime = p->vruntime;
-		}
-	}
+    // targetp를 찾기 .. ?????
+    if (firstp){
+      // min_vruntime 찾기
+	    for (p=proc; p<&proc[NPROC]; p++){
+        if (p->state == RUNNABLE && p->vruntime < min_vruntime){
+          min_vruntime = p->vruntime;
+        }
+      }
 
-   	 // min_vruntime 구하고 나서 eligibility 계산에 필요한 값 구하기
-    	for (p=proc; p<&proc[NPROC]; p++){
-	    if (p->state == RUNNABLE){
-		    total_weight += p->weight;
-		    calculated += (p->vruntime - min_vruntime) * p->weight;
-	    }
-    	}
-
+   	  // min_vruntime 구하고 나서 eligibility 계산에 필요한 값 구하기
+      for (p=proc; p<&proc[NPROC]; p++){
+	      if (p->state == RUNNABLE){
+		      total_weight += p->weight;
+		      calculated += (p->vruntime - min_vruntime) * p->weight;
+	      }
+      }
 
     	// eligibility 확인 & vdeadline 제일 빠른 프로세스
     	for(p = proc; p < &proc[NPROC]; p++) {
-      		if(p->state == RUNNABLE) {
-			if (calculated >= (p->vruntime - min_vruntime)*total_weight){
-				p->is_eligible = 1;
-		} else {
-			p->is_eligible = 0;
-		}
+        if(p->state == RUNNABLE) {
+			    if (calculated >= (p->vruntime - min_vruntime)*total_weight){
+            p->is_eligible = 1;
+          } else {
+              p->is_eligible = 0;
+            }
+          if (p->is_eligible){
+            if (targetp == 0){
+              targetp = p;
+            } else if (p->vdeadline < targetp->vdeadline){
+              targetp = p;}		
+            }	
+          }
+        }
 
-		if (p->is_eligible){
-			if (targetp == 0){
-				targetp = p;
-			} else if (p->vdeadline < targetp->vdeadline){
-				targetp = p;
-			}		
-		}	
-	}
-      }
-
-    	// 실행할 프로세스를 찾은 경우
+      // 실행할 프로세스를 찾은 경우
     	if (targetp) {
-		//printf("targetp: %d\n", targetp->pid);
-	    targetp->state = RUNNING;
-	    c->proc = targetp;
-
-	    swtch(&c->context, &targetp->context);
-	    c->proc = 0;
+	      targetp->state = RUNNING;
+	      c->proc = targetp;
+	      swtch(&c->context, &targetp->context);
+	      c->proc = 0;
     	}
-    }
+    } // if (firstp)
 
     release(&proct_lock); 
+
     if (targetp==0){
 	    asm volatile("wfi");
     }
-  }
+  } // scheduler
 }
 
 // Switch to scheduler.  Must hold only p->lock

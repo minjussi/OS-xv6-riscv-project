@@ -150,24 +150,3 @@ sys_waitpid()
 	argint(0, &pid);
 	return waitpid(pid);
 }
-
-// return 값 결정해야함
-uint64
-sys_mmap()
-{
-	int pid;
-	argint(0, &pid);
-}
-
-uint64
-sys_munmap()
-{
-	int pid;
-	argint(0, &pid);
-}
-
-uint64
-sys_freemem()
-{
-	return ;
-}
